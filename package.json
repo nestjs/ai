@@ -75,7 +75,7 @@
     "@nestjs/resilience": "0.0.3",
     "@nestjs/testing": "12.3.3",
     "@nestjs/workflows": "0.0.5",
-    "@types/node": "24.19.2",
+    "@types/node": "26.6.6",
     "ai": "7.0.164",
     "husky": "9.1.7",
     "lint-staged": "17.6.0",
