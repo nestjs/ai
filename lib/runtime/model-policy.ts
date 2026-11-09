@@ -220,7 +220,7 @@ export function resolveModelPolicy(
   }
   if (conflicts.length > 0) {
     throw new AiConfigurationError(
-      `Cannot use ${conflicts.join(' and ')} with \`resilience\` at ${resilienceLevel.name}. ` +
+      `Model "${labelOf(model)}": cannot use ${conflicts.join(' and ')} with \`resilience\` at ${resilienceLevel.name}. ` +
         'Remove the listed `retry`/`timeout` settings or remove the selected `resilience` policy. ' +
         'A custom policy cannot replace settings at the same or a higher-priority level.',
     );

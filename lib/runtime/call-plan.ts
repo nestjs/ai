@@ -112,7 +112,8 @@ export function createCallPlan(
     }
     return policy;
   };
-  chain.forEach(policyFor);
+  // Validate the primary before a request; fallback policies resolve when their model is selected.
+  policyFor(primary);
 
   const pick = <K extends keyof GenerationSettings>(model: ResolvedModel, key: K): GenerationSettings[K] =>
     (options as GenerationSettings)[key] ?? (model.settings as GenerationSettings)[key] ?? (defaults as GenerationSettings)[key];

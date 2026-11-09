@@ -64,8 +64,8 @@ describe('model calls on @nestjs/resilience', () => {
     await without.close();
   });
 
-  it('validates fallback policies before running the primary model', async () => {
-    const primary = new FakeModel(() => providerError(503));
+  it('does not validate an unused fallback policy', async () => {
+    const primary = new FakeModel(() => 'from the primary');
     const fallback = new FakeModel(() => 'must not run');
     const { moduleRef: ref, ai } = await createAi({
       models: {
@@ -79,9 +79,42 @@ describe('model calls on @nestjs/resilience', () => {
     });
     moduleRef = ref;
 
-    await expect(ai.generateText({ prompt: 'Hi' })).rejects.toThrow(AiConfigurationError);
-    expect(primary.calls).toHaveLength(0);
+    expect((await ai.generateText({ prompt: 'Hi' })).text).toBe('from the primary');
+    expect(primary.calls).toHaveLength(1);
     expect(fallback.calls).toHaveLength(0);
+  });
+
+  it('propagates a conflicting fallback policy when reached without trying later fallbacks', async () => {
+    const primary = new FakeModel(() => providerError(503));
+    const fallback = new FakeModel(() => 'must not run');
+    const laterFallback = new FakeModel(() => 'must not run either');
+    const { moduleRef: ref, ai } = await createAi({
+      models: {
+        default: { model: primary, fallback: ['backup', 'later'] },
+        backup: {
+          model: fallback,
+          resilience: ResiliencePolicy.wrap(new RetryPolicy(false)),
+          retry: false,
+        },
+        later: { model: laterFallback },
+      },
+      defaults: { retry: false },
+    });
+    moduleRef = ref;
+
+    const error = await ai.generateText({ prompt: 'Hi' }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AiConfigurationError);
+    expect(error).not.toBeInstanceOf(AiModelError);
+    expect(error).toMatchObject({
+      message: expect.stringContaining('Model "backup"'),
+    });
+    expect(error).toMatchObject({
+      message: expect.stringContaining('`retry` at model'),
+    });
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(0);
+    expect(laterFallback.calls).toHaveLength(0);
   });
 
   it('resolves retry and timeout independently through call, model and module settings', async () => {
@@ -355,7 +388,7 @@ describe('model calls on @nestjs/resilience', () => {
     ).rejects.toMatchObject({
       name: 'AiConfigurationError',
       message: expect.stringContaining(
-        '`timeout` at call with `resilience` at call. Remove the listed `retry`/`timeout` settings',
+        '`timeout` at call with `resilience` at call',
       ),
     });
     await expect(ai.embed({ value: 'default policy conflict', retry: false })).rejects.toThrow(
@@ -363,6 +396,29 @@ describe('model calls on @nestjs/resilience', () => {
     );
     expect(generated.calls).toHaveLength(0);
     expect(embedded.calls).toHaveLength(0);
+  });
+
+  it('identifies an unnamed model by provider and model id in configuration errors', async () => {
+    const unnamed = new FakeModel(() => 'must not run');
+    const { moduleRef: ref, ai } = await createAi({
+      models: { default: { model: new FakeModel(() => 'default') } },
+    });
+    moduleRef = ref;
+
+    const error = await ai
+      .generateText({
+        prompt: 'Hi',
+        model: unnamed,
+        resilience: ResiliencePolicy.wrap(new RetryPolicy(false)),
+        retry: false,
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AiConfigurationError);
+    expect(error).toMatchObject({
+      message: expect.stringContaining('Model "fake:fake-model"'),
+    });
+    expect(unnamed.calls).toHaveLength(0);
   });
 
   it('lets higher-priority resilience replace lower-priority retry, timeout and resilience settings', async () => {
