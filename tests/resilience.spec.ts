@@ -124,6 +124,49 @@ describe('model calls on @nestjs/resilience', () => {
     expect(embedded.calls).toHaveLength(3);
   });
 
+  it('lets model resilience replace lower-priority retry and timeout defaults', async () => {
+    const generated = new FakeModel([
+      providerError(503),
+      { text: 'model policy', delay: 20 },
+    ]);
+    const embedded = new FakeEmbeddingModel([
+      providerError(503),
+      { embeddings: [[4]], usage: { tokens: 1 }, delay: 20 },
+    ]);
+    const { moduleRef: ref, ai } = await createAi({
+      models: {
+        default: {
+          model: generated,
+          resilience: ResiliencePolicy.wrap(
+            new RetryPolicy({ attempts: 2, backoff: { delay: 0 } }),
+          ),
+        },
+      },
+      defaults: {
+        retry: { attempts: 4, backoff: { delay: 0 } },
+        timeout: '5ms',
+      },
+      embeddingModels: {
+        default: {
+          model: embedded,
+          resilience: ResiliencePolicy.wrap(
+            new RetryPolicy({ attempts: 2, backoff: { delay: 0 } }),
+          ),
+        },
+      },
+      embeddingDefaults: {
+        retry: { attempts: 4, backoff: { delay: 0 } },
+        timeout: '5ms',
+      },
+    });
+    moduleRef = ref;
+
+    expect((await ai.generateText({ prompt: 'Hi' })).text).toBe('model policy');
+    expect(generated.calls).toHaveLength(2);
+    expect((await ai.embed({ value: 'hello' })).embedding).toEqual([4]);
+    expect(embedded.calls).toHaveLength(2);
+  });
+
   it('preserves explicit false retry and timeout settings on calls', async () => {
     const generated = new FakeModel(async () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 40));
