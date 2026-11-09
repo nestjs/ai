@@ -74,8 +74,9 @@ export function createCallPlan(
   }
   const defaults = moduleOptions.defaults ?? {};
   const primary = models.resolve(options.model);
+  const identity = (model: ResolvedModel) => model.info.name ?? model.model;
   const chain = [primary, ...fallbacks(options.fallback, primary, models)].filter(
-    (model, index, all) => all.findIndex((other) => other.model === model.model) === index,
+    (model, index, all) => all.findIndex((other) => identity(other) === identity(model)) === index,
   );
 
   const caller: AiCaller = { ...options.caller };
