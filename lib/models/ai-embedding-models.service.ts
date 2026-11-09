@@ -14,6 +14,7 @@ import type {
 } from '../interfaces/ai-embedding.interface.js';
 import type { AiModuleOptions } from '../interfaces/ai-module-options.interface.js';
 import type { AiModelInfo } from '../interfaces/ai-result.interface.js';
+import { assertPolicyLevels } from '../runtime/model-policy.js';
 import { assertModelRegistries } from './model-registry.util.js';
 
 /** One resolved embedding model. Internal; embedding calls never switch to fallback models. */
@@ -37,10 +38,16 @@ export class AiEmbeddingModels {
   ) {
     assertModelRegistries(options);
     assertSettings(options.embeddingDefaults, 'AiModule: `embeddingDefaults`');
+    const defaults = options.embeddingDefaults ?? {};
+    assertPolicyLevels('AiModule: `embeddingDefaults`', [{ name: 'embedding defaults', settings: defaults }]);
     for (const [name, entry] of Object.entries(options.embeddingModels ?? {})) {
       const { model, pricing, ...settings } = isDefinition(entry) ? entry : { model: entry };
       assertModel(model, `AiModule: the embedding model "${name}"`);
       assertSettings(settings, `AiModule: the embedding model "${name}"`);
+      assertPolicyLevels(`AiModule: the embedding model "${name}"`, [
+        { name: 'model', settings },
+        { name: 'embedding defaults', settings: defaults },
+      ]);
       if (
         pricing !== undefined &&
         (typeof pricing !== 'object' ||

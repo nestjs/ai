@@ -17,6 +17,8 @@ import { AiConfigurationError, AiModelError } from '../lib/index.js';
 import { FakeEmbeddingModel, FakeModel, providerError } from '../lib/testing/index.js';
 import { createAi } from './support/module.js';
 
+const shared = () => ResiliencePolicy.wrap(new RetryPolicy(false));
+
 describe('model calls on @nestjs/resilience', () => {
   let moduleRef: TestingModule | undefined;
 
@@ -64,57 +66,110 @@ describe('model calls on @nestjs/resilience', () => {
     await without.close();
   });
 
-  it('does not validate an unused fallback policy', async () => {
+  it("does not hold a call's settings against a fallback it never reaches", async () => {
     const primary = new FakeModel(() => 'from the primary');
     const fallback = new FakeModel(() => 'must not run');
     const { moduleRef: ref, ai } = await createAi({
       models: {
         default: { model: primary, fallback: 'backup' },
-        backup: {
-          model: fallback,
-          resilience: ResiliencePolicy.wrap(new RetryPolicy(false)),
-          retry: false,
-        },
+        backup: { model: fallback, resilience: ResiliencePolicy.wrap(new RetryPolicy(false)) },
       },
     });
     moduleRef = ref;
 
-    expect((await ai.generateText({ prompt: 'Hi' })).text).toBe('from the primary');
+    expect((await ai.generateText({ prompt: 'Hi', timeout: '2s' })).text).toBe('from the primary');
     expect(primary.calls).toHaveLength(1);
     expect(fallback.calls).toHaveLength(0);
   });
 
-  it('propagates a conflicting fallback policy when reached without trying later fallbacks', async () => {
+  it.each([{ timeout: '2s' as const }, { retry: false as const }])('runs a fallback under its own policy when a call sets %j', async (settings) => {
     const primary = new FakeModel(() => providerError(503));
-    const fallback = new FakeModel(() => 'must not run');
-    const laterFallback = new FakeModel(() => 'must not run either');
+    const fallback = new FakeModel([providerError(503), 'from the backup']);
+    const later = new FakeModel(() => 'must not run');
     const { moduleRef: ref, ai } = await createAi({
       models: {
-        default: { model: primary, fallback: ['backup', 'later'] },
+        default: { model: primary, retry: false, fallback: ['backup', 'later'] },
         backup: {
           model: fallback,
-          resilience: ResiliencePolicy.wrap(new RetryPolicy(false)),
-          retry: false,
+          resilience: ResiliencePolicy.wrap(new RetryPolicy({ attempts: 2, backoff: { delay: 0 } })),
         },
-        later: { model: laterFallback },
+        later,
       },
-      defaults: { retry: false },
     });
     moduleRef = ref;
 
-    const error = await ai.generateText({ prompt: 'Hi' }).catch((caught: unknown) => caught);
-
-    expect(error).toBeInstanceOf(AiConfigurationError);
-    expect(error).not.toBeInstanceOf(AiModelError);
-    expect(error).toMatchObject({
-      message: expect.stringContaining('Model "backup"'),
-    });
-    expect(error).toMatchObject({
-      message: expect.stringContaining('`retry` at model'),
-    });
+    expect((await ai.generateText({ prompt: 'Hi', ...settings })).text).toBe('from the backup');
     expect(primary.calls).toHaveLength(1);
-    expect(fallback.calls).toHaveLength(0);
-    expect(laterFallback.calls).toHaveLength(0);
+    expect(fallback.calls).toHaveLength(2);
+    expect(later.calls).toHaveLength(0);
+  });
+
+  it('goes on to the next fallback when the policy of a fallback gives up', async () => {
+    const primary = new FakeModel(() => providerError(503));
+    const fallback = new FakeModel(() => providerError(503));
+    const later = new FakeModel(() => 'from the later fallback');
+    const { moduleRef: ref, ai } = await createAi({
+      models: {
+        default: { model: primary, fallback: ['backup', 'later'] },
+        backup: { model: fallback, resilience: ResiliencePolicy.wrap(new RetryPolicy(false)) },
+        later,
+      },
+    });
+    moduleRef = ref;
+
+    expect((await ai.generateText({ prompt: 'Hi', retry: false })).text).toBe('from the later fallback');
+    expect(fallback.calls).toHaveLength(1);
+    expect(later.calls).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      where: 'beside the policy of a model',
+      options: () => ({ models: { default: { model: new FakeModel(() => 'x'), resilience: shared(), retry: false as const } } }),
+      message: 'AiModule: the model "default" cannot use `retry` at model with `resilience` at model',
+    },
+    {
+      where: 'on a model that takes the policy of the defaults',
+      options: () => ({ models: { default: { model: new FakeModel(() => 'x'), timeout: '10s' as const } }, defaults: { resilience: shared() } }),
+      message: 'AiModule: the model "default" cannot use `timeout` at model with `resilience` at module defaults',
+    },
+    {
+      where: 'beside the policy of the defaults',
+      options: () => ({ models: { default: new FakeModel(() => 'x') }, defaults: { resilience: shared(), timeout: false as const } }),
+      message: 'AiModule: `defaults` cannot use `timeout` at module defaults with `resilience` at module defaults',
+    },
+    {
+      where: 'on a model that only serves as a fallback',
+      options: () => ({
+        models: {
+          default: { model: new FakeModel(() => 'x'), fallback: 'backup' },
+          backup: { model: new FakeModel(() => 'y'), resilience: shared(), retry: false as const },
+        },
+      }),
+      message: 'AiModule: the model "backup" cannot use `retry` at model',
+    },
+    {
+      where: 'on an embedding model that takes the policy of the defaults',
+      options: () => ({
+        models: { default: new FakeModel(() => 'x') },
+        embeddingModels: { default: { model: new FakeEmbeddingModel(() => ({ embeddings: [[1]] })), retry: false as const } },
+        embeddingDefaults: { resilience: shared() },
+      }),
+      message: 'AiModule: the embedding model "default" cannot use `retry` at model with `resilience` at embedding defaults',
+    },
+    {
+      where: 'beside the policy of the embedding defaults',
+      options: () => ({
+        models: { default: new FakeModel(() => 'x') },
+        embeddingDefaults: { resilience: shared(), timeout: '1s' as const },
+      }),
+      message: 'AiModule: `embeddingDefaults` cannot use `timeout` at embedding defaults',
+    },
+  ])('fails at startup with a retry or timeout $where', async ({ options, message }) => {
+    await expect(createAi(options())).rejects.toMatchObject({
+      name: 'AiConfigurationError',
+      message: expect.stringContaining(message),
+    });
   });
 
   it('resolves retry and timeout independently through call, model and module settings', async () => {
@@ -342,26 +397,16 @@ describe('model calls on @nestjs/resilience', () => {
     expect(embedded.calls).toHaveLength(2);
   });
 
-  it('rejects conflicts at the selected resilience level or above before provider execution', async () => {
+  it("rejects a call's settings beside the policy that applies before provider execution", async () => {
     const instance = ResiliencePolicy.wrap(new RetryPolicy(false));
     const callInstance = ResiliencePolicy.wrap(new RetryPolicy(false));
     const generated = new FakeModel(() => 'must not run');
     const embedded = new FakeEmbeddingModel(() => ({ embeddings: [[1]] }));
     const { moduleRef: ref, ai } = await createAi(
       {
-        models: {
-          default: {
-            model: generated,
-            resilience: instance,
-            retry: false,
-            timeout: false,
-          },
-        },
-        defaults: { resilience: instance, timeout: false },
-        embeddingModels: {
-          default: { model: embedded, retry: false, timeout: false },
-        },
-        embeddingDefaults: { resilience: 'embedding-shared', timeout: false },
+        models: { default: { model: generated, resilience: instance } },
+        embeddingModels: { default: { model: embedded } },
+        embeddingDefaults: { resilience: 'embedding-shared' },
       },
       {
         imports: [
@@ -437,29 +482,13 @@ describe('model calls on @nestjs/resilience', () => {
     );
     const { moduleRef: ref, ai } = await createAi(
       {
-        models: {
-          default: {
-            model: generated,
-            resilience: lowerPolicy,
-            retry: { attempts: 3, backoff: { delay: 0 } },
-            timeout: '5ms',
-          },
-        },
+        models: { default: { model: generated, resilience: lowerPolicy } },
         defaults: {
-          resilience: lowerPolicy,
           retry: { attempts: 4, backoff: { delay: 0 } },
           timeout: '5ms',
         },
-        embeddingModels: {
-          default: {
-            model: embedded,
-            resilience: lowerPolicy,
-            retry: { attempts: 3, backoff: { delay: 0 } },
-            timeout: '5ms',
-          },
-        },
+        embeddingModels: { default: { model: embedded, resilience: lowerPolicy } },
         embeddingDefaults: {
-          resilience: lowerPolicy,
           retry: { attempts: 4, backoff: { delay: 0 } },
           timeout: '5ms',
         },

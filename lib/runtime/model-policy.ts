@@ -184,49 +184,47 @@ export function modelPolicy(
   return policies.length > 0 ? ResiliencePolicy.wrap(...policies) : undefined;
 }
 
+/** The levels a setting can come from, highest priority first. */
+export type PolicyLevels = ReadonlyArray<{ name: string; settings: AiResilienceSettings }>;
+
+const isSet = (value: unknown) => value !== undefined && value !== null;
+
 /**
- * Resolves retry, timeout and a custom policy independently by precedence. A custom policy replaces generated
- * retry/timeout policies; explicit settings at its own or a higher-priority level cannot be silently ignored.
+ * Rejects a `retry` or `timeout` set at the level of the custom policy that applies, or above it: the policy replaces
+ * the ones built from them, so they would be ignored without a word.
  */
-export function resolveModelPolicy(
-  model: PolicyModel,
-  levels: ReadonlyArray<{ name: string; settings: AiResilienceSettings }>,
-  preset: (name: string) => ResiliencePolicy,
-  namespace = 'ai',
-): ResiliencePolicy | undefined {
-  const retry = levels
-    .find(({ settings }) => settings.retry !== undefined && settings.retry !== null)
-    ?.settings.retry;
-  const timeout = levels
-    .find(({ settings }) => settings.timeout !== undefined && settings.timeout !== null)
-    ?.settings.timeout;
-  const resilienceIndex = levels.findIndex(
-    ({ settings }) => settings.resilience !== undefined && settings.resilience !== null,
-  );
-
-  if (resilienceIndex === -1) {
-    return modelPolicy(model, { retry, timeout }, namespace);
+export function assertPolicyLevels(where: string, levels: PolicyLevels): void {
+  const selected = levels.findIndex(({ settings }) => isSet(settings.resilience));
+  if (selected === -1) {
+    return;
   }
-
-  const resilienceLevel = levels[resilienceIndex]!;
-  const conflicts: string[] = [];
-  for (const { name, settings } of levels.slice(0, resilienceIndex + 1)) {
-    if (settings.retry !== undefined && settings.retry !== null) {
-      conflicts.push(`\`retry\` at ${name}`);
-    }
-    if (settings.timeout !== undefined && settings.timeout !== null) {
-      conflicts.push(`\`timeout\` at ${name}`);
-    }
-  }
+  const conflicts = levels
+    .slice(0, selected + 1)
+    .flatMap(({ name, settings }) =>
+      (['retry', 'timeout'] as const).filter((key) => isSet(settings[key])).map((key) => `\`${key}\` at ${name}`),
+    );
   if (conflicts.length > 0) {
     throw new AiConfigurationError(
-      `Model "${labelOf(model)}": cannot use ${conflicts.join(' and ')} with \`resilience\` at ${resilienceLevel.name}. ` +
+      `${where} cannot use ${conflicts.join(' and ')} with \`resilience\` at ${levels[selected]!.name}. ` +
         'Remove the listed `retry`/`timeout` settings or remove the selected `resilience` policy. ' +
         'A custom policy cannot replace settings at the same or a higher-priority level.',
     );
   }
+}
 
-  const resilience = resilienceLevel.settings.resilience!;
+/** The policy a model's settings select: a custom one, or else the one built from `retry` and `timeout`. */
+export function resolveModelPolicy(
+  model: PolicyModel,
+  levels: PolicyLevels,
+  preset: (name: string) => ResiliencePolicy,
+  namespace = 'ai',
+): ResiliencePolicy | undefined {
+  const pick = <K extends keyof AiResilienceSettings>(key: K) =>
+    levels.find(({ settings }) => isSet(settings[key]))?.settings[key];
+  const resilience = pick('resilience');
+  if (resilience === undefined) {
+    return modelPolicy(model, { retry: pick('retry'), timeout: pick('timeout') }, namespace);
+  }
   return typeof resilience === 'string' ? preset(resilience) : resilience;
 }
 
@@ -325,7 +323,7 @@ function nameOf(model: PolicyModel, namespace = 'ai'): string {
   return `${namespace}:${labelOf(model)}`;
 }
 
-function labelOf(model: PolicyModel): string {
+export function labelOf(model: PolicyModel): string {
   return model.info.name ?? `${model.info.provider}:${model.info.modelId}`;
 }
 

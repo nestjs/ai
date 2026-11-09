@@ -7,7 +7,7 @@ import type { AiCaller } from '../interfaces/ai-tool.interface.js';
 import type { AiUsageEvent } from '../interfaces/ai-usage.interface.js';
 import type { AiModels, ResolvedModel } from '../models/ai-models.service.js';
 import type { AiToolProgress, AiTools } from '../tools/ai-tools.service.js';
-import { resolveModelPolicy, type PolicyPlan, type StepAttempt } from './model-policy.js';
+import { assertPolicyLevels, labelOf, resolveModelPolicy, type PolicyLevels, type PolicyPlan, type StepAttempt } from './model-policy.js';
 import { validateBudget } from '../utils/usage.util.js';
 
 const DEFAULT_MAX_STEPS = 10;
@@ -95,26 +95,16 @@ export function createCallPlan(
   const budget = options.budget ?? defaults.budget;
   validateBudget(budget);
 
-  const policies = new Map<ResolvedModel, ResiliencePolicy | undefined>();
-  const policyFor = (model: ResolvedModel): ResiliencePolicy | undefined => {
-    let policy = policies.get(model);
-    if (!policies.has(model)) {
-      policy = resolveModelPolicy(
-        model,
-        [
-          { name: 'call', settings: options },
-          { name: 'model', settings: model.settings },
-          { name: 'module defaults', settings: defaults },
-        ],
-        preset,
-      );
-      policies.set(model, policy);
-    }
-    return policy;
-  };
-  // Validate the primary before a request; fallback policies resolve when their model is selected.
-  policyFor(primary);
+  const levelsOf = (model: ResolvedModel): PolicyLevels => [
+    { name: 'call', settings: options },
+    { name: 'model', settings: model.settings },
+    { name: 'module defaults', settings: defaults },
+  ];
+  // A call's `retry` and `timeout` are held against the model it starts with. A fallback is tried under its own
+  // policies, and what the module configures was checked at startup.
+  assertPolicyLevels(`Model "${labelOf(primary)}"`, levelsOf(primary));
 
+  const policies = new Map<ResolvedModel, ResiliencePolicy | undefined>();
   const pick = <K extends keyof GenerationSettings>(model: ResolvedModel, key: K): GenerationSettings[K] =>
     (options as GenerationSettings)[key] ?? (model.settings as GenerationSettings)[key] ?? (defaults as GenerationSettings)[key];
 
@@ -132,7 +122,14 @@ export function createCallPlan(
     listeners: [moduleOptions.onUsage, options.onUsage].filter((listener) => typeof listener === 'function'),
     source: options.label ?? 'AiService',
     fallbackIf: options.fallbackIf ?? (() => true),
-    policyFor,
+    policyFor: (model) => {
+      let policy = policies.get(model);
+      if (!policies.has(model)) {
+        policy = resolveModelPolicy(model, levelsOf(model), preset);
+        policies.set(model, policy);
+      }
+      return policy;
+    },
     settingsFor: (model) => {
       const settings: GenerationSettings = {};
       for (const key of [
