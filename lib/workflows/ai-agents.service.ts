@@ -183,7 +183,7 @@ export class AiAgents {
     const waiting = calls
       .filter((call) => settings.approve.includes(call.toolName))
       .map((call) => ({
-        key: approvalKey(state.runId, call.toolCallId),
+        key: approvalKey(state.runId, index, call.toolCallId),
         runId: state.runId,
         toolCallId: call.toolCallId,
         toolName: call.toolName,
@@ -288,8 +288,9 @@ export class AiAgents {
 /** The workflow a run goes on in after `stepsPerInstance` model calls (`AiAgentSegment`). */
 export const AGENT_WORKFLOW = 'nestjs-ai.agent';
 
-export function approvalKey(runId: string, toolCallId: string): string {
-  return `${runId}:${toolCallId}`;
+// The step's index keeps the key unique when a provider reuses tool call ids across responses (TGI gives each one "0").
+export function approvalKey(runId: string, index: number, toolCallId: string): string {
+  return `${runId}:${index}:${toolCallId}`;
 }
 
 function initialMessages(options: AiAgentRunOptions): ModelMessage[] {

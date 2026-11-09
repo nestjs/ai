@@ -69,7 +69,10 @@ export interface AiToolApproval {
 
 /** A tool call waiting for approval, as `AiAgents.pendingApprovals()` lists it. */
 export interface AiPendingApproval {
-  /** What `approve()` and `reject()` take. */
+  /**
+   * What `approve()` and `reject()` take. Read it from `pendingApprovals()` rather than build it: its format can change
+   * between versions, and a key read before an update does not answer a call that waits after it.
+   */
   key: string;
   /** The run (the instance `AiAgents.run()` runs in). */
   runId: string;
