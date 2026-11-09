@@ -143,7 +143,7 @@ describe('durable agent runs', () => {
 
     expect(await first.client.getStatus('run-2')).toMatchObject({ status: 'suspended' });
     const [pending] = await first.agents.pendingApprovals('run-2');
-    expect(pending).toEqual({ key: 'run-2:call-2', runId: 'run-2', toolCallId: 'call-2', toolName: 'refund', input: { orderId: 'ord_1' } });
+    expect(pending).toEqual({ key: 'run-2:1:call-2', runId: 'run-2', toolCallId: 'call-2', toolName: 'refund', input: { orderId: 'ord_1' } });
     expect(world.calls.map((call) => call.tool)).toEqual(['find-order']);
 
     // The process goes away; the approval comes three days later, to another one.
@@ -182,6 +182,37 @@ describe('durable agent runs', () => {
     ]);
     const output = (await client.getStatus('run-3'))!.output as { toolResults: unknown[] };
     expect(output.toolResults).toContainEqual(expect.objectContaining({ toolName: 'refund', error: 'The call was rejected: The order is past the refund window' }));
+  });
+
+  it.each([
+    { where: 'in one workflow', runId: 'run-4', stepsPerInstance: undefined },
+    { where: 'across child workflows', runId: 'run-4-child', stepsPerInstance: 1 },
+  ])('waits for its own approval when a later step reuses a tool call id, $where', async ({ runId, stepsPerInstance }) => {
+    // text-generation-inference, for example, gives every tool call the id "0".
+    const model = new FakeModel([
+      { toolCalls: [{ name: 'refund', id: '0', input: { orderId: 'ord_1' } }] },
+      { toolCalls: [{ name: 'refund', id: '0', input: { orderId: 'ord_2' } }] },
+      'Both orders were refunded.',
+    ]);
+    const { client, worker, agents } = await boot(model);
+    await client.start(
+      RefundRequest,
+      { email: 'Please refund ord_1 and ord_2', customer: 'bob', ...(stepsPerInstance !== undefined && { stepsPerInstance }) },
+      { id: runId },
+    );
+    await worker.drain();
+
+    const [first] = await agents.pendingApprovals(runId);
+    await agents.approve(first!.key);
+    await worker.drain();
+    const [second] = await agents.pendingApprovals(runId);
+    expect(second).toMatchObject({ toolCallId: '0', input: { orderId: 'ord_2' } });
+    await agents.approve(second!.key);
+    await worker.drain();
+
+    expect(await client.getStatus(runId)).toMatchObject({ status: 'completed', output: { text: 'Both orders were refunded.' } });
+    expect(world.calls.map((call) => call.input)).toEqual([{ orderId: 'ord_1' }, { orderId: 'ord_2' }]);
+    expect(await agents.pendingApprovals(runId)).toEqual([]);
   });
 
   it('replays a finished tool from the journal when the process dies in the next model call', async () => {
