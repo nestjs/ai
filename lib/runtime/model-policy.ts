@@ -194,9 +194,15 @@ export function resolveModelPolicy(
   preset: (name: string) => ResiliencePolicy,
   namespace = 'ai',
 ): ResiliencePolicy | undefined {
-  const retry = levels.find(({ settings }) => settings.retry !== undefined)?.settings.retry;
-  const timeout = levels.find(({ settings }) => settings.timeout !== undefined)?.settings.timeout;
-  const resilienceIndex = levels.findIndex(({ settings }) => settings.resilience !== undefined);
+  const retry = levels
+    .find(({ settings }) => settings.retry !== undefined && settings.retry !== null)
+    ?.settings.retry;
+  const timeout = levels
+    .find(({ settings }) => settings.timeout !== undefined && settings.timeout !== null)
+    ?.settings.timeout;
+  const resilienceIndex = levels.findIndex(
+    ({ settings }) => settings.resilience !== undefined && settings.resilience !== null,
+  );
 
   if (resilienceIndex === -1) {
     return modelPolicy(model, { retry, timeout }, namespace);
@@ -205,10 +211,10 @@ export function resolveModelPolicy(
   const resilienceLevel = levels[resilienceIndex]!;
   const conflicts: string[] = [];
   for (const { name, settings } of levels.slice(0, resilienceIndex + 1)) {
-    if (settings.retry !== undefined) {
+    if (settings.retry !== undefined && settings.retry !== null) {
       conflicts.push(`\`retry\` at ${name}`);
     }
-    if (settings.timeout !== undefined) {
+    if (settings.timeout !== undefined && settings.timeout !== null) {
       conflicts.push(`\`timeout\` at ${name}`);
     }
   }

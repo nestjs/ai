@@ -176,6 +176,67 @@ describe('model calls on @nestjs/resilience', () => {
     expect(performance.now() - embeddingStarted).toBeGreaterThanOrEqual(30);
   });
 
+  it('treats null resilience settings as unspecified', async () => {
+    const generated = new FakeModel([
+      providerError(503),
+      { text: 'model policy', delay: 20 },
+    ]);
+    const embedded = new FakeEmbeddingModel([
+      providerError(503),
+      { embeddings: [[3]], usage: { tokens: 1 }, delay: 20 },
+    ]);
+    const { moduleRef: ref, ai } = await createAi({
+      models: {
+        default: {
+          model: generated,
+          resilience: ResiliencePolicy.wrap(
+            new RetryPolicy({ attempts: 2, backoff: { delay: 0 } }),
+          ),
+        },
+      },
+      defaults: {
+        retry: { attempts: 4, backoff: { delay: 0 } },
+        timeout: '5ms',
+      },
+      embeddingModels: {
+        default: {
+          model: embedded,
+          resilience: ResiliencePolicy.wrap(
+            new RetryPolicy({ attempts: 2, backoff: { delay: 0 } }),
+          ),
+        },
+      },
+      embeddingDefaults: {
+        retry: { attempts: 4, backoff: { delay: 0 } },
+        timeout: '5ms',
+      },
+    });
+    moduleRef = ref;
+
+    expect(
+      (
+        await ai.generateText({
+          prompt: 'Hi',
+          resilience: null as never,
+          retry: null as never,
+          timeout: null as never,
+        })
+      ).text,
+    ).toBe('model policy');
+    expect(generated.calls).toHaveLength(2);
+    expect(
+      (
+        await ai.embed({
+          value: 'hello',
+          resilience: null as never,
+          retry: null as never,
+          timeout: null as never,
+        })
+      ).embedding,
+    ).toEqual([3]);
+    expect(embedded.calls).toHaveLength(2);
+  });
+
   it('rejects conflicts at the selected resilience level or above before provider execution', async () => {
     const instance = ResiliencePolicy.wrap(new RetryPolicy(false));
     const callInstance = ResiliencePolicy.wrap(new RetryPolicy(false));
