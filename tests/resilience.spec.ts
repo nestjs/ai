@@ -280,7 +280,12 @@ describe('model calls on @nestjs/resilience', () => {
         resilience: callInstance,
         timeout: false,
       }),
-    ).rejects.toThrow(AiConfigurationError);
+    ).rejects.toMatchObject({
+      name: 'AiConfigurationError',
+      message: expect.stringContaining(
+        '`timeout` at call with `resilience` at call. Remove the listed `retry`/`timeout` settings',
+      ),
+    });
     await expect(ai.embed({ value: 'default policy conflict', retry: false })).rejects.toThrow(
       AiConfigurationError,
     );
