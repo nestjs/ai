@@ -21,6 +21,7 @@ describe('model calls on @nestjs/resilience', () => {
   let moduleRef: TestingModule | undefined;
 
   afterEach(async () => {
+    vi.useRealTimers();
     await moduleRef?.close();
     moduleRef = undefined;
   });
@@ -84,6 +85,7 @@ describe('model calls on @nestjs/resilience', () => {
   });
 
   it('resolves retry and timeout independently through call, model and module settings', async () => {
+    vi.useFakeTimers();
     const generated = new FakeModel([
       providerError(503),
       { text: 'retried', delay: 150 },
@@ -114,17 +116,32 @@ describe('model calls on @nestjs/resilience', () => {
     });
     moduleRef = ref;
 
-    expect((await ai.generateText({ prompt: 'Hi', timeout: '250ms' })).text).toBe('retried');
+    const callTimedGeneration = ai.generateText({
+      prompt: 'Hi',
+      timeout: '250ms',
+    });
+    await vi.advanceTimersByTimeAsync(150);
+    expect((await callTimedGeneration).text).toBe('retried');
     expect(generated.calls).toHaveLength(2);
-    expect((await ai.generateText({ prompt: 'Hi' })).text).toBe('model timeout');
+
+    const modelTimedGeneration = ai.generateText({ prompt: 'Hi' });
+    await vi.advanceTimersByTimeAsync(50);
+    expect((await modelTimedGeneration).text).toBe('model timeout');
     expect(generated.calls).toHaveLength(3);
-    expect((await ai.embed({ value: 'hello', timeout: '250ms' })).embedding).toEqual([1]);
+
+    const callTimedEmbedding = ai.embed({ value: 'hello', timeout: '250ms' });
+    await vi.advanceTimersByTimeAsync(150);
+    expect((await callTimedEmbedding).embedding).toEqual([1]);
     expect(embedded.calls).toHaveLength(2);
-    expect((await ai.embed({ value: 'hello' })).embedding).toEqual([2]);
+
+    const modelTimedEmbedding = ai.embed({ value: 'hello' });
+    await vi.advanceTimersByTimeAsync(50);
+    expect((await modelTimedEmbedding).embedding).toEqual([2]);
     expect(embedded.calls).toHaveLength(3);
   });
 
   it('lets model resilience replace lower-priority retry and timeout defaults', async () => {
+    vi.useFakeTimers();
     const generated = new FakeModel([
       providerError(503),
       { text: 'model policy', delay: 20 },
@@ -161,13 +178,19 @@ describe('model calls on @nestjs/resilience', () => {
     });
     moduleRef = ref;
 
-    expect((await ai.generateText({ prompt: 'Hi' })).text).toBe('model policy');
+    const generation = ai.generateText({ prompt: 'Hi' });
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await generation).text).toBe('model policy');
     expect(generated.calls).toHaveLength(2);
-    expect((await ai.embed({ value: 'hello' })).embedding).toEqual([4]);
+
+    const embedding = ai.embed({ value: 'hello' });
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await embedding).embedding).toEqual([4]);
     expect(embedded.calls).toHaveLength(2);
   });
 
   it('preserves explicit false retry and timeout settings on calls', async () => {
+    vi.useFakeTimers();
     const generated = new FakeModel(async () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 40));
       return providerError(503);
@@ -202,24 +225,33 @@ describe('model calls on @nestjs/resilience', () => {
     });
     moduleRef = ref;
 
-    const generationStarted = performance.now();
-    const generationError = await ai
+    const generation = ai
       .generateText({ prompt: 'Hi', retry: false, timeout: false })
       .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(40);
+    const generationError = await generation;
     expect(generationError).toBeInstanceOf(AiModelError);
+    expect((generationError as AiModelError).cause).toMatchObject({
+      statusCode: 503,
+    });
+    expect((generationError as AiModelError).attempts).toHaveLength(1);
     expect(generated.calls).toHaveLength(1);
-    expect(performance.now() - generationStarted).toBeGreaterThanOrEqual(30);
 
-    const embeddingStarted = performance.now();
-    const embeddingError = await ai
+    const embedding = ai
       .embed({ value: 'hello', retry: false, timeout: false })
       .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(40);
+    const embeddingError = await embedding;
     expect(embeddingError).toBeInstanceOf(AiModelError);
+    expect((embeddingError as AiModelError).cause).toMatchObject({
+      statusCode: 503,
+    });
+    expect((embeddingError as AiModelError).attempts).toHaveLength(1);
     expect(embedded.calls).toHaveLength(1);
-    expect(performance.now() - embeddingStarted).toBeGreaterThanOrEqual(30);
   });
 
   it('treats null resilience settings as unspecified', async () => {
+    vi.useFakeTimers();
     const generated = new FakeModel([
       providerError(503),
       { text: 'model policy', delay: 20 },
@@ -256,27 +288,24 @@ describe('model calls on @nestjs/resilience', () => {
     });
     moduleRef = ref;
 
-    expect(
-      (
-        await ai.generateText({
-          prompt: 'Hi',
-          resilience: null as never,
-          retry: null as never,
-          timeout: null as never,
-        })
-      ).text,
-    ).toBe('model policy');
+    const generation = ai.generateText({
+      prompt: 'Hi',
+      resilience: null as never,
+      retry: null as never,
+      timeout: null as never,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await generation).text).toBe('model policy');
     expect(generated.calls).toHaveLength(2);
-    expect(
-      (
-        await ai.embed({
-          value: 'hello',
-          resilience: null as never,
-          retry: null as never,
-          timeout: null as never,
-        })
-      ).embedding,
-    ).toEqual([3]);
+
+    const embedding = ai.embed({
+      value: 'hello',
+      resilience: null as never,
+      retry: null as never,
+      timeout: null as never,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await embedding).embedding).toEqual([3]);
     expect(embedded.calls).toHaveLength(2);
   });
 
@@ -337,6 +366,7 @@ describe('model calls on @nestjs/resilience', () => {
   });
 
   it('lets higher-priority resilience replace lower-priority retry, timeout and resilience settings', async () => {
+    vi.useFakeTimers();
     const generated = new FakeModel([
       providerError(503),
       { text: 'retried by call policy', delay: 20 },
@@ -393,18 +423,20 @@ describe('model calls on @nestjs/resilience', () => {
     );
     moduleRef = ref;
 
-    expect(
-      (await ai.generateText({ prompt: 'Hi', resilience: callPolicy })).text,
-    ).toBe('retried by call policy');
+    const generation = ai.generateText({
+      prompt: 'Hi',
+      resilience: callPolicy,
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await generation).text).toBe('retried by call policy');
     expect(generated.calls).toHaveLength(2);
-    expect(
-      (
-        await ai.embed({
-          value: 'hello',
-          resilience: 'call-embedding',
-        })
-      ).embedding,
-    ).toEqual([2]);
+
+    const embedding = ai.embed({
+      value: 'hello',
+      resilience: 'call-embedding',
+    });
+    await vi.advanceTimersByTimeAsync(20);
+    expect((await embedding).embedding).toEqual([2]);
     expect(embedded.calls).toHaveLength(2);
   });
 
