@@ -186,21 +186,44 @@ describe('model calls', () => {
     });
 
     it('tries separately configured models that share a language model, with their own settings and retries', async () => {
-      const shared = new FakeModel([providerError(503), providerError(503), 'from patient']);
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        const shared = new FakeModel([providerError(503), providerError(503), 'from patient']);
+        const { moduleRef: ref, ai } = await createAi({
+          models: {
+            default: { model: shared, fallback: 'patient', temperature: 0.2, retry: false },
+            patient: { model: shared, temperature: 0.8, retry: { ...noWait, attempts: 2 } },
+          },
+        });
+        moduleRef = ref;
+
+        const result = await ai.generateText({ prompt: 'Hi' });
+
+        expect(result.text).toBe('from patient');
+        expect(result.model.name).toBe('patient');
+        expect(result.steps[0]!.attempts).toBe(3);
+        expect(shared.calls.map((call) => call.options.temperature)).toEqual([0.2, 0.8, 0.8]);
+        expect(warn.mock.calls).toEqual([
+          ['The model "default" failed (APICallError, 503: The provider answered 503); falling back to "patient".'],
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('tries a direct fallback that shares the configured model instance', async () => {
+      const shared = new FakeModel([providerError(503), 'from the direct fallback']);
       const { moduleRef: ref, ai } = await createAi({
-        models: {
-          default: { model: shared, fallback: 'patient', temperature: 0.2, retry: false },
-          patient: { model: shared, temperature: 0.8, retry: { ...noWait, attempts: 2 } },
-        },
+        models: { default: { model: shared, temperature: 0.2 } },
+        defaults: { retry: false },
       });
       moduleRef = ref;
 
-      const result = await ai.generateText({ prompt: 'Hi' });
+      const result = await ai.generateText({ prompt: 'Hi', fallback: shared });
 
-      expect(result.text).toBe('from patient');
-      expect(result.model.name).toBe('patient');
-      expect(result.steps[0]!.attempts).toBe(3);
-      expect(shared.calls.map((call) => call.options.temperature)).toEqual([0.2, 0.8, 0.8]);
+      expect(result.text).toBe('from the direct fallback');
+      expect(result.model).toEqual({ provider: 'fake', modelId: 'fake-model' });
+      expect(shared.calls).toHaveLength(2);
     });
 
     it('deduplicates repeated configured names and direct model references', async () => {
