@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, type OnModuleInit } from '@nestjs/common';
 import { DiscoveryService, ExternalContextCreator, MetadataScanner } from '@nestjs/core';
+import { isObservable, lastValueFrom } from 'rxjs';
 import type { Schema, ToolSet } from 'ai';
 import { AGENT_FUNCTION_METADATA, AI_CONTEXT_TYPE, AI_MODULE_OPTIONS, AI_PARAMS_METADATA } from '../ai.constants.js';
 import { AiParamsFactory, recordHandlerParams } from '../context/ai-params.js';
@@ -166,8 +167,11 @@ export class AiTools implements OnModuleInit {
     let value: unknown;
     try {
       value = await entry.handler(input ?? {}, context);
+      if (isObservable(value)) {
+        value = await lastValueFrom(value);
+      }
     } catch (error) {
-      // Nest's exception handler has run the filters, and logged the error.
+      // Nest's exception filters have run; map the failure to the error the model reads.
       throw toToolError(error, entry.name);
     }
     try {

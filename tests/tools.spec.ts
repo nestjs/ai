@@ -4,10 +4,13 @@
  * method that is an MCP tool too, each decorator with its own options.
  */
 import {
+  Catch,
   createParamDecorator,
+  ForbiddenException,
   Injectable,
   Module,
   Scope,
+  UseFilters,
   UseGuards,
   type CanActivate,
   type DynamicModule,
@@ -17,6 +20,7 @@ import { Test } from '@nestjs/testing';
 import { McpModule, McpRegistry, Tool } from '@nestjs/mcp';
 import { connectMcpClient } from '@nestjs/mcp/testing';
 import { generateText } from 'ai';
+import { EMPTY, of, throwError } from 'rxjs';
 import * as z from 'zod';
 import {
   AgentFunction,
@@ -27,11 +31,53 @@ import {
   type AgentFunctionContext,
   type AiContextType,
 } from '../lib/index.js';
-import { FakeModel } from '../lib/testing/index.js';
+import { callTool, FakeModel } from '../lib/testing/index.js';
 import { createAi } from './support/module.js';
 
 /** One schema for both decorators of `search`. */
 const SearchInput = z.object({ query: z.string() });
+
+@Catch()
+class ReturnsObservableFilter {
+  catch() {
+    return of({ refunded: false, reason: 'Not your order' });
+  }
+}
+
+@Catch()
+class ReturnsErrorObservableFilter {
+  catch() {
+    return throwError(() => new ForbiddenException('Not your order'));
+  }
+}
+
+@Catch()
+class ReturnsEmptyObservableFilter {
+  catch() {
+    return EMPTY;
+  }
+}
+
+@Injectable()
+class ObservableFilterTools {
+  @AgentFunction({ name: 'observable-result' })
+  @UseFilters(ReturnsObservableFilter)
+  result() {
+    throw new Error('The order belongs to another customer');
+  }
+
+  @AgentFunction({ name: 'observable-error' })
+  @UseFilters(ReturnsErrorObservableFilter)
+  error() {
+    throw new Error('The order belongs to another customer');
+  }
+
+  @AgentFunction({ name: 'observable-empty' })
+  @UseFilters(ReturnsEmptyObservableFilter)
+  empty() {
+    throw new Error('The order belongs to another customer');
+  }
+}
 
 @Injectable()
 class CatalogTools {
@@ -211,6 +257,43 @@ describe('the registry of agent functions', () => {
     await expect(tools.call('failed', {})).rejects.toMatchObject({ name: 'AiToolError', message: 'Out of stock' });
     expect(await tools.call('stock', {})).toBeNull();
     await expect(tools.call('product', { sku: 1 })).rejects.toThrow('Invalid input: sku: Invalid input: expected string');
+    await moduleRef.close();
+  });
+
+  it('unwraps Observables returned by exception filters', async () => {
+    const recovered = { refunded: false, reason: 'Not your order' };
+    const model = new FakeModel([
+      { toolCalls: [{ name: 'observable-result' }] },
+      (call) => `The model read: ${JSON.stringify(call.toolResults[0]!.output)}`,
+      { toolCalls: [{ name: 'observable-error' }] },
+      'The model saw the tool error.',
+    ]);
+    const { moduleRef, ai } = await createAi(
+      { models: { default: model } },
+      { providers: [ObservableFilterTools] },
+    );
+
+    const result = await ai.generateText({
+      prompt: 'Refund order 42',
+      tools: ['observable-result'],
+    });
+    expect(result.toolResults[0]!.output).toEqual(recovered);
+    expect(model.lastCall!.toolResults[0]!.output).toEqual(recovered);
+    expect(result.text).toBe(`The model read: ${JSON.stringify(recovered)}`);
+
+    const failed = await ai.generateText({
+      prompt: 'Refund order 42',
+      tools: ['observable-error'],
+    });
+    expect(failed.toolResults[0]!.error).toBe('Not your order');
+    await expect(callTool(moduleRef, 'observable-error')).rejects.toMatchObject({
+      name: 'AiToolError',
+      message: 'Not your order',
+    });
+    await expect(callTool(moduleRef, 'observable-empty')).rejects.toMatchObject({
+      name: 'AiToolError',
+      message: 'Internal server error',
+    });
     await moduleRef.close();
   });
 
