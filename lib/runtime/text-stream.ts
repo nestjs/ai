@@ -17,7 +17,9 @@ export interface AiStreamResponseOptions extends AiUIMessageStreamOptions {
   headers?: Record<string, string>;
   /**
    * A comment line (`: keep-alive`) sent after this long without a chunk, while a tool runs or the model thinks, so
-   * that proxies and load balancers do not close the connection as idle. Default `'15s'`; `false` for none.
+   * that proxies and load balancers do not close the connection as idle. `pipeUIMessageStreamToResponse()` sends
+   * nothing before the first chunk, keep-alive included, so that a failure before it can still be retried, fall back
+   * to another model or reach the route's exception filters. Default `'15s'`; `false` for none.
    */
   keepAlive?: Duration | false;
 }
