@@ -286,6 +286,7 @@ describe('the registry of agent functions', () => {
       tools: ['observable-error'],
     });
     expect(failed.toolResults[0]!.error).toBe('Not your order');
+    expect(JSON.stringify(model.lastCall!.options.prompt)).toContain('Not your order');
     await expect(callTool(moduleRef, 'observable-error')).rejects.toMatchObject({
       name: 'AiToolError',
       message: 'Not your order',
