@@ -63,6 +63,26 @@ describe('model calls on @nestjs/resilience', () => {
     await without.close();
   });
 
+  it('validates fallback policies before running the primary model', async () => {
+    const primary = new FakeModel(() => providerError(503));
+    const fallback = new FakeModel(() => 'must not run');
+    const { moduleRef: ref, ai } = await createAi({
+      models: {
+        default: { model: primary, fallback: 'backup' },
+        backup: {
+          model: fallback,
+          resilience: ResiliencePolicy.wrap(new RetryPolicy(false)),
+          retry: false,
+        },
+      },
+    });
+    moduleRef = ref;
+
+    await expect(ai.generateText({ prompt: 'Hi' })).rejects.toThrow(AiConfigurationError);
+    expect(primary.calls).toHaveLength(0);
+    expect(fallback.calls).toHaveLength(0);
+  });
+
   it('resolves retry and timeout independently through call, model and module settings', async () => {
     const generated = new FakeModel([
       providerError(503),

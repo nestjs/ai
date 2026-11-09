@@ -96,6 +96,24 @@ export function createCallPlan(
   validateBudget(budget);
 
   const policies = new Map<ResolvedModel, ResiliencePolicy | undefined>();
+  const policyFor = (model: ResolvedModel): ResiliencePolicy | undefined => {
+    let policy = policies.get(model);
+    if (!policies.has(model)) {
+      policy = resolveModelPolicy(
+        model,
+        [
+          { name: 'call', settings: options },
+          { name: 'model', settings: model.settings },
+          { name: 'module defaults', settings: defaults },
+        ],
+        preset,
+      );
+      policies.set(model, policy);
+    }
+    return policy;
+  };
+  chain.forEach(policyFor);
+
   const pick = <K extends keyof GenerationSettings>(model: ResolvedModel, key: K): GenerationSettings[K] =>
     (options as GenerationSettings)[key] ?? (model.settings as GenerationSettings)[key] ?? (defaults as GenerationSettings)[key];
 
@@ -113,22 +131,7 @@ export function createCallPlan(
     listeners: [moduleOptions.onUsage, options.onUsage].filter((listener) => typeof listener === 'function'),
     source: options.label ?? 'AiService',
     fallbackIf: options.fallbackIf ?? (() => true),
-    policyFor: (model) => {
-      let policy = policies.get(model);
-      if (!policies.has(model)) {
-        policy = resolveModelPolicy(
-          model,
-          [
-            { name: 'call', settings: options },
-            { name: 'model', settings: model.settings },
-            { name: 'module defaults', settings: defaults },
-          ],
-          preset,
-        );
-        policies.set(model, policy);
-      }
-      return policy;
-    },
+    policyFor,
     settingsFor: (model) => {
       const settings: GenerationSettings = {};
       for (const key of [
