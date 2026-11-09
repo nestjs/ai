@@ -7,7 +7,7 @@ import type { AiCaller } from '../interfaces/ai-tool.interface.js';
 import type { AiUsageEvent } from '../interfaces/ai-usage.interface.js';
 import type { AiModels, ResolvedModel } from '../models/ai-models.service.js';
 import type { AiToolProgress, AiTools } from '../tools/ai-tools.service.js';
-import { modelPolicy, type PolicyPlan, type StepAttempt } from './model-policy.js';
+import { resolveModelPolicy, type PolicyPlan, type StepAttempt } from './model-policy.js';
 import { validateBudget } from '../utils/usage.util.js';
 
 const DEFAULT_MAX_STEPS = 10;
@@ -116,16 +116,15 @@ export function createCallPlan(
     policyFor: (model) => {
       let policy = policies.get(model);
       if (!policies.has(model)) {
-        const own = options.resilience ?? model.settings.resilience ?? defaults.resilience;
-        policy =
-          own === undefined
-            ? modelPolicy(model, {
-                retry: options.retry ?? model.settings.retry ?? defaults.retry,
-                timeout: options.timeout ?? model.settings.timeout ?? defaults.timeout,
-              })
-            : typeof own === 'string'
-              ? preset(own)
-              : own;
+        policy = resolveModelPolicy(
+          model,
+          [
+            { name: 'call', settings: options },
+            { name: 'model', settings: model.settings },
+            { name: 'module defaults', settings: defaults },
+          ],
+          preset,
+        );
         policies.set(model, policy);
       }
       return policy;

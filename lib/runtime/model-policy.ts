@@ -18,6 +18,7 @@ import {
   AiOutputError,
   type AiAttemptFailure,
 } from '../errors/ai.errors.js';
+import type { AiResilienceSettings } from '../interfaces/ai-module-options.interface.js';
 import type { ResolvedModel } from '../models/ai-models.service.js';
 import type { AiModelInfo } from '../interfaces/ai-result.interface.js';
 import { toMilliseconds } from '../utils/duration.util.js';
@@ -181,6 +182,46 @@ export function modelPolicy(
     policies.push(new TimeoutPolicy({ timeout: toMilliseconds(timeout ?? DEFAULT_TIMEOUT, 'timeout'), name: `${nameOf(model, namespace)} timeout` }));
   }
   return policies.length > 0 ? ResiliencePolicy.wrap(...policies) : undefined;
+}
+
+/**
+ * Resolves retry, timeout and a custom policy independently by precedence. A custom policy replaces generated
+ * retry/timeout policies; explicit settings at its own or a higher-priority level cannot be silently ignored.
+ */
+export function resolveModelPolicy(
+  model: PolicyModel,
+  levels: ReadonlyArray<{ name: string; settings: AiResilienceSettings }>,
+  preset: (name: string) => ResiliencePolicy,
+  namespace = 'ai',
+): ResiliencePolicy | undefined {
+  const retry = levels.find(({ settings }) => settings.retry !== undefined)?.settings.retry;
+  const timeout = levels.find(({ settings }) => settings.timeout !== undefined)?.settings.timeout;
+  const resilienceIndex = levels.findIndex(({ settings }) => settings.resilience !== undefined);
+
+  if (resilienceIndex === -1) {
+    return modelPolicy(model, { retry, timeout }, namespace);
+  }
+
+  const resilienceLevel = levels[resilienceIndex]!;
+  const conflicts: string[] = [];
+  for (const { name, settings } of levels.slice(0, resilienceIndex + 1)) {
+    if (settings.retry !== undefined) {
+      conflicts.push(`\`retry\` at ${name}`);
+    }
+    if (settings.timeout !== undefined) {
+      conflicts.push(`\`timeout\` at ${name}`);
+    }
+  }
+  if (conflicts.length > 0) {
+    throw new AiConfigurationError(
+      `Cannot use ${conflicts.join(' and ')} with \`resilience\` at ${resilienceLevel.name}. ` +
+        'A custom `resilience` policy replaces generated `retry` and `timeout` policies. ' +
+        'Remove the conflicting setting or move `resilience` to a higher-priority level.',
+    );
+  }
+
+  const resilience = resilienceLevel.settings.resilience!;
+  return typeof resilience === 'string' ? preset(resilience) : resilience;
 }
 
 const DEFAULT_TIMEOUT = '60s';

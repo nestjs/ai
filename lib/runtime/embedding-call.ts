@@ -19,7 +19,7 @@ import type {
   AiEmbeddingModels,
   ResolvedEmbeddingModel,
 } from '../models/ai-embedding-models.service.js';
-import { modelPolicy, runStep, type PolicyPlan } from './model-policy.js';
+import { resolveModelPolicy, runStep, type PolicyPlan } from './model-policy.js';
 
 const NEVER_ABORTED = new AbortController().signal;
 const DEFAULT_MAX_PARALLEL_CALLS = 4;
@@ -54,13 +54,16 @@ export function createEmbeddingPlan(
   if (!Number.isSafeInteger(maxParallelCalls) || maxParallelCalls < 1) {
     throw new AiConfigurationError('`maxParallelCalls` must be a finite positive whole number.');
   }
-  const own = pick('resilience');
-  const policy =
-    own === undefined
-      ? modelPolicy(model, { retry: pick('retry'), timeout: pick('timeout') }, 'ai:embedding')
-      : typeof own === 'string'
-        ? preset(own)
-        : own;
+  const policy = resolveModelPolicy(
+    model,
+    [
+      { name: 'call', settings: options },
+      { name: 'model', settings: model.settings },
+      { name: 'embedding defaults', settings: defaults },
+    ],
+    preset,
+    'ai:embedding',
+  );
   return {
     model,
     chain: [model],

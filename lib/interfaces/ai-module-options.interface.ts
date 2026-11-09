@@ -42,13 +42,15 @@ export interface AiResilienceSettings {
   /**
    * A policy of your own (`ResiliencePolicy.wrap(breaker, retry, timeout)`), or the name of a preset of
    * `ResilienceService` (`ResilienceModule.forRoot({ presets })`), in place of `retry` and `timeout`: a circuit
-   * breaker or a bulkhead shared with the rest of the application. Fallback models are applied around it. An
-   * embedding call runs it around each provider request, so a bulkhead or a rate limit counts requests.
+   * breaker or a bulkhead shared with the rest of the application. Lower-priority `retry` and `timeout` settings are
+   * replaced; explicitly setting either at the same or a higher-priority level is an error. Fallback models are
+   * applied around it. An embedding call runs it around each provider request, so a bulkhead or a rate limit counts
+   * requests.
    */
   resilience?: ResiliencePolicy | string;
 }
 
-/** Settings a language model, the module's `defaults` and each call can set; the call's win, then the model's. */
+/** Settings a language model, the module's `defaults` and each call can set. Each field resolves call, model, defaults. */
 export interface AiCallSettings extends AiResilienceSettings {
   /** Generation settings passed to the model. */
   maxOutputTokens?: number;
