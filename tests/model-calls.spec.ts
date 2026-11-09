@@ -185,6 +185,72 @@ describe('model calls', () => {
       expect(usage).toEqual([expect.objectContaining({ model: expect.objectContaining({ name: 'backup' }), fallback: true, attempt: 1 })]);
     });
 
+    it('tries separately configured models that share a language model, with their own settings and retries', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      try {
+        const shared = new FakeModel([providerError(503), providerError(503), 'from patient']);
+        const { moduleRef: ref, ai } = await createAi({
+          models: {
+            default: { model: shared, fallback: 'patient', temperature: 0.2, retry: false },
+            patient: { model: shared, temperature: 0.8, retry: { ...noWait, attempts: 2 } },
+          },
+        });
+        moduleRef = ref;
+
+        const result = await ai.generateText({ prompt: 'Hi' });
+
+        expect(result.text).toBe('from patient');
+        expect(result.model.name).toBe('patient');
+        expect(result.steps[0]!.attempts).toBe(3);
+        expect(shared.calls.map((call) => call.options.temperature)).toEqual([0.2, 0.8, 0.8]);
+        expect(warn.mock.calls).toEqual([
+          ['The model "default" failed (APICallError, 503: The provider answered 503); falling back to "patient".'],
+        ]);
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it('tries a direct fallback that shares the configured model instance', async () => {
+      const shared = new FakeModel([providerError(503), 'from the direct fallback']);
+      const { moduleRef: ref, ai } = await createAi({
+        models: { default: { model: shared, temperature: 0.2 } },
+        defaults: { retry: false },
+      });
+      moduleRef = ref;
+
+      const result = await ai.generateText({ prompt: 'Hi', fallback: shared });
+
+      expect(result.text).toBe('from the direct fallback');
+      expect(result.model).toEqual({ provider: 'fake', modelId: 'fake-model' });
+      expect(shared.calls).toHaveLength(2);
+    });
+
+    it('deduplicates repeated configured names and direct model references', async () => {
+      const primary = new FakeModel(() => providerError(500));
+      const backup = new FakeModel([providerError(500), 'would answer if tried twice']);
+      const directPrimary = new FakeModel(() => providerError(500));
+      const directBackup = new FakeModel([providerError(500), 'would answer if tried twice']);
+      const { moduleRef: ref, ai } = await createAi({
+        models: {
+          default: { model: primary, fallback: ['backup', 'backup'] },
+          backup,
+        },
+        defaults: { retry: false },
+      });
+      moduleRef = ref;
+
+      await expect(ai.generateText({ prompt: 'configured' })).rejects.toBeInstanceOf(AiModelError);
+      expect(primary.calls).toHaveLength(1);
+      expect(backup.calls).toHaveLength(1);
+
+      await expect(
+        ai.generateText({ model: directPrimary, fallback: [directBackup, directBackup], prompt: 'direct' }),
+      ).rejects.toBeInstanceOf(AiModelError);
+      expect(directPrimary.calls).toHaveLength(1);
+      expect(directBackup.calls).toHaveLength(1);
+    });
+
     it('takes a fallback per call, or none', async () => {
       const primary = new FakeModel(() => providerError(500));
       const { moduleRef: ref, ai } = await createAi({
