@@ -7,7 +7,10 @@ import type {
   AiEmbeddingUsageEvent,
 } from './ai-embedding.interface.js';
 
-/** Prices per million tokens, in a unit of your choice: what `cost` is reported in. */
+/**
+ * Prices per million tokens, in a unit of your choice: what `cost` is reported in.
+ * Each price must be finite and nonnegative; invalid pricing fails at startup.
+ */
 export interface AiModelPricing {
   input: number;
   output: number;

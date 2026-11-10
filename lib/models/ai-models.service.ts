@@ -39,6 +39,7 @@ export class AiModels {
     for (const [name, entry] of Object.entries(models)) {
       const { model, pricing, fallback, ...settings } = isDefinition(entry) ? entry : { model: entry };
       assertModel(model, `AiModule: the model "${name}"`);
+      assertPricing(pricing, `AiModule: the model "${name}"`);
       assertPolicyLevels(`AiModule: the model "${name}"`, [
         { name: 'model', settings },
         { name: 'module defaults', settings: defaults },
@@ -126,6 +127,26 @@ function assertModel(model: unknown, where: string): void {
     throw new AiConfigurationError(
       `${where} is not a language model. Pass one from a provider package, e.g. anthropic('claude-opus-5-5') from @ai-sdk/anthropic.`,
     );
+  }
+}
+
+function assertPricing(pricing: AiModelPricing | undefined, where: string): void {
+  if (pricing === undefined) {
+    return;
+  }
+  if (typeof pricing !== 'object' || pricing === null || Array.isArray(pricing)) {
+    throw new AiConfigurationError(`${where} pricing must contain input and output prices.`);
+  }
+  for (const field of ['input', 'output', 'cachedInput'] as const) {
+    const value = pricing[field];
+    if (field === 'cachedInput' && value === undefined) {
+      continue;
+    }
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new AiConfigurationError(
+        `${where} pricing.${field} must be a finite nonnegative number.`,
+      );
+    }
   }
 }
 
