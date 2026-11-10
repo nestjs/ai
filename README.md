@@ -94,22 +94,6 @@ The [sample](sample) is a cat store: it triages support emails, and runs a chat 
 
 Read [Overview](https://docs.nestjs.com/ai/overview) to get started and for the module's options, [Models](https://docs.nestjs.com/ai/models) for retries, timeouts, fallback models and budgets, [Tools](https://docs.nestjs.com/ai/tools) for agent functions, the call context, guards and authorization, [Agents](https://docs.nestjs.com/ai/agents) for the agent loop, streaming to the browser and durable runs, [Embeddings](https://docs.nestjs.com/ai/embeddings) for embedding models and batches, and [Testing](https://docs.nestjs.com/ai/testing) for the fake models.
 
-Model `pricing` sets prices per million tokens for cost reporting and `budget.maxCost`. Its `input`
-and `output` prices are required, and `cachedInput` is optional (default: `input`). Every price must
-be finite and nonnegative; invalid pricing fails at startup, before a provider is called. Zero
-prices are supported:
-
-```ts
-AiModule.forRoot({
-  models: {
-    default: {
-      model: anthropic('claude-opus-5-5'),
-      pricing: { input: 4, output: 20, cachedInput: 0.2 },
-    },
-  },
-});
-```
-
 ## Support
 
 Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
