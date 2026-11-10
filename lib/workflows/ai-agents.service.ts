@@ -3,7 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import { NonRetryableStepError, WorkflowClient, WorkflowSignal, type WorkflowContext } from '@nestjs/workflows';
 import type { ModelMessage } from 'ai';
 import { AI_MODULE_OPTIONS } from '../ai.constants.js';
-import { AiConfigurationError, AiToolError } from '../errors/ai.errors.js';
+import { AiConfigurationError, AiError, AiToolError } from '../errors/ai.errors.js';
 import type { AiCallOptions } from '../interfaces/ai-call-options.interface.js';
 import type { AiCallDefaults, AiModuleOptions } from '../interfaces/ai-module-options.interface.js';
 import type { AiStep, AiTextResult, AiToolResult } from '../interfaces/ai-result.interface.js';
@@ -176,6 +176,18 @@ export class AiAgents {
     index: number,
     step: StepOutcome['step'],
   ): Promise<AiToolResult[]> {
+    // A call's id names its approval, its wait and its step: two calls with one id can't be told apart.
+    const ids = new Set<string>();
+    for (const call of step.toolCalls) {
+      if (ids.has(call.toolCallId)) {
+        throw new AiError(
+          `The model's response at step ${index} has more than one tool call with the id "${call.toolCallId}", ` +
+            'so the run stops before any of them runs.',
+        );
+      }
+      ids.add(call.toolCallId);
+    }
+
     const answered = new Set(step.toolResults.map((result) => result.toolCallId));
     const calls = step.toolCalls.filter((call) => !answered.has(call.toolCallId));
 

@@ -215,6 +215,37 @@ describe('durable agent runs', () => {
     expect(await agents.pendingApprovals(runId)).toEqual([]);
   });
 
+  it('fails a response that gives two tool calls one id, before either runs, also after a restart', async () => {
+    const model = new FakeModel([
+      {
+        toolCalls: [
+          { name: 'find-order', id: 'dup', input: { orderId: 'ord_1' } },
+          { name: 'refund', id: 'dup', input: { orderId: 'ord_2' } },
+        ],
+      },
+      'Both orders were handled.',
+    ]);
+    const first = await boot(model);
+    await first.client.start(RefundRequest, { email: 'Please refund ord_2', customer: 'bob' }, { id: 'run-dup' });
+    await first.worker.drain();
+
+    const failed = {
+      status: 'failed',
+      error: { message: 'The model\'s response at step 0 has more than one tool call with the id "dup", so the run stops before any of them runs.' },
+    };
+    expect(await first.client.getStatus('run-dup', { journal: true })).toMatchObject({
+      ...failed,
+      journal: [{ kind: 'step', name: 'model-0' }],
+    });
+    expect(await first.agents.pendingApprovals('run-dup')).toEqual([]);
+
+    const second = await restart(first.app, model);
+    await second.worker.drain();
+    expect(await second.client.getStatus('run-dup')).toMatchObject(failed);
+    expect(world.calls).toEqual([]);
+    expect(model.calls).toHaveLength(1);
+  });
+
   it('replays a finished tool from the journal when the process dies in the next model call', async () => {
     let hang = true;
     const answer = (call: FakeModelCall): FakeAnswer => {
