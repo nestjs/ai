@@ -7,7 +7,7 @@ import type { AiCaller } from '../interfaces/ai-tool.interface.js';
 import type { AiUsageEvent } from '../interfaces/ai-usage.interface.js';
 import type { AiModels, ResolvedModel } from '../models/ai-models.service.js';
 import type { AiToolProgress, AiTools } from '../tools/ai-tools.service.js';
-import { modelPolicy, type PolicyPlan, type StepAttempt } from './model-policy.js';
+import { assertPolicyLevels, labelOf, resolveModelPolicy, type PolicyLevels, type PolicyPlan, type StepAttempt } from './model-policy.js';
 import { validateBudget } from '../utils/usage.util.js';
 
 const DEFAULT_MAX_STEPS = 10;
@@ -96,6 +96,15 @@ export function createCallPlan(
   const budget = options.budget ?? defaults.budget;
   validateBudget(budget);
 
+  const levelsOf = (model: ResolvedModel): PolicyLevels => [
+    { name: 'call', settings: options },
+    { name: 'model', settings: model.settings },
+    { name: 'module defaults', settings: defaults },
+  ];
+  // A call's `retry` and `timeout` are held against the model it starts with. A fallback is tried under its own
+  // policies, and what the module configures was checked at startup.
+  assertPolicyLevels(`Model "${labelOf(primary)}"`, levelsOf(primary));
+
   const policies = new Map<ResolvedModel, ResiliencePolicy | undefined>();
   const pick = <K extends keyof GenerationSettings>(model: ResolvedModel, key: K): GenerationSettings[K] =>
     (options as GenerationSettings)[key] ?? (model.settings as GenerationSettings)[key] ?? (defaults as GenerationSettings)[key];
@@ -117,16 +126,7 @@ export function createCallPlan(
     policyFor: (model) => {
       let policy = policies.get(model);
       if (!policies.has(model)) {
-        const own = options.resilience ?? model.settings.resilience ?? defaults.resilience;
-        policy =
-          own === undefined
-            ? modelPolicy(model, {
-                retry: options.retry ?? model.settings.retry ?? defaults.retry,
-                timeout: options.timeout ?? model.settings.timeout ?? defaults.timeout,
-              })
-            : typeof own === 'string'
-              ? preset(own)
-              : own;
+        policy = resolveModelPolicy(model, levelsOf(model), preset);
         policies.set(model, policy);
       }
       return policy;

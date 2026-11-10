@@ -18,6 +18,7 @@ import {
   AiOutputError,
   type AiAttemptFailure,
 } from '../errors/ai.errors.js';
+import type { AiResilienceSettings } from '../interfaces/ai-module-options.interface.js';
 import type { ResolvedModel } from '../models/ai-models.service.js';
 import type { AiModelInfo } from '../interfaces/ai-result.interface.js';
 import { toMilliseconds } from '../utils/duration.util.js';
@@ -183,6 +184,50 @@ export function modelPolicy(
   return policies.length > 0 ? ResiliencePolicy.wrap(...policies) : undefined;
 }
 
+/** The levels a setting can come from, highest priority first. */
+export type PolicyLevels = ReadonlyArray<{ name: string; settings: AiResilienceSettings }>;
+
+const isSet = (value: unknown) => value !== undefined && value !== null;
+
+/**
+ * Rejects a `retry` or `timeout` set at the level of the custom policy that applies, or above it: the policy replaces
+ * the ones built from them, so they would be ignored without a word.
+ */
+export function assertPolicyLevels(where: string, levels: PolicyLevels): void {
+  const selected = levels.findIndex(({ settings }) => isSet(settings.resilience));
+  if (selected === -1) {
+    return;
+  }
+  const conflicts = levels
+    .slice(0, selected + 1)
+    .flatMap(({ name, settings }) =>
+      (['retry', 'timeout'] as const).filter((key) => isSet(settings[key])).map((key) => `\`${key}\` at ${name}`),
+    );
+  if (conflicts.length > 0) {
+    throw new AiConfigurationError(
+      `${where} cannot use ${conflicts.join(' and ')} with \`resilience\` at ${levels[selected]!.name}. ` +
+        'Remove the listed `retry`/`timeout` settings or remove the selected `resilience` policy. ' +
+        'A custom policy cannot replace settings at the same or a higher-priority level.',
+    );
+  }
+}
+
+/** The policy a model's settings select: a custom one, or else the one built from `retry` and `timeout`. */
+export function resolveModelPolicy(
+  model: PolicyModel,
+  levels: PolicyLevels,
+  preset: (name: string) => ResiliencePolicy,
+  namespace = 'ai',
+): ResiliencePolicy | undefined {
+  const pick = <K extends keyof AiResilienceSettings>(key: K) =>
+    levels.find(({ settings }) => isSet(settings[key]))?.settings[key];
+  const resilience = pick('resilience');
+  if (resilience === undefined) {
+    return modelPolicy(model, { retry: pick('retry'), timeout: pick('timeout') }, namespace);
+  }
+  return typeof resilience === 'string' ? preset(resilience) : resilience;
+}
+
 const DEFAULT_TIMEOUT = '60s';
 const DEFAULT_BACKOFF = { delay: 1_000, factor: 2, maxDelay: 30_000 };
 
@@ -278,7 +323,7 @@ function nameOf(model: PolicyModel, namespace = 'ai'): string {
   return `${namespace}:${labelOf(model)}`;
 }
 
-function labelOf(model: PolicyModel): string {
+export function labelOf(model: PolicyModel): string {
   return model.info.name ?? `${model.info.provider}:${model.info.modelId}`;
 }
 

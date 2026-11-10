@@ -10,6 +10,7 @@ import type {
 } from '../interfaces/ai-module-options.interface.js';
 import type { AiModelInfo } from '../interfaces/ai-result.interface.js';
 import { AI_MODEL_OVERRIDES, AI_MODULE_OPTIONS, DEFAULT_MODEL_NAME } from '../ai.constants.js';
+import { assertPolicyLevels } from '../runtime/model-policy.js';
 import { assertModelRegistries } from './model-registry.util.js';
 
 /** A model, as calls use it. Internal. */
@@ -32,10 +33,16 @@ export class AiModels {
     @Optional() @Inject(AI_MODEL_OVERRIDES) overrides?: Record<string, LanguageModel> | null,
   ) {
     assertModelRegistries(options);
+    const defaults = options.defaults ?? {};
+    assertPolicyLevels('AiModule: `defaults`', [{ name: 'module defaults', settings: defaults }]);
     const models = options.models ?? {};
     for (const [name, entry] of Object.entries(models)) {
       const { model, pricing, fallback, ...settings } = isDefinition(entry) ? entry : { model: entry };
       assertModel(model, `AiModule: the model "${name}"`);
+      assertPolicyLevels(`AiModule: the model "${name}"`, [
+        { name: 'model', settings },
+        { name: 'module defaults', settings: defaults },
+      ]);
       const replacement = overrides?.[name];
       const used = replacement ?? model;
       this.models.set(name, {
