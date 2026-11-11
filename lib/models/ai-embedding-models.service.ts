@@ -48,18 +48,7 @@ export class AiEmbeddingModels {
         { name: 'model', settings },
         { name: 'embedding defaults', settings: defaults },
       ]);
-      if (
-        pricing !== undefined &&
-        (typeof pricing !== 'object' ||
-          pricing === null ||
-          !Number.isFinite(pricing.input) ||
-          pricing.input < 0)
-      ) {
-        throw new AiConfigurationError(
-          `AiModule: the embedding model "${name}" pricing.input must be ` +
-            'a finite nonnegative number.',
-        );
-      }
+      assertPricing(pricing, `AiModule: the embedding model "${name}"`);
       const used = overrides?.[name] ?? model;
       assertModel(used, `AiModule: the replacement embedding model "${name}"`);
       this.models.set(name, {
@@ -173,6 +162,21 @@ function assertSettings(settings: AiEmbeddingSettings | undefined, where: string
   ) {
     throw new AiConfigurationError(
       `${where} maxParallelCalls must be a finite positive safe integer.`,
+    );
+  }
+}
+
+function assertPricing(pricing: AiEmbeddingModelPricing | undefined, where: string): void {
+  if (pricing === undefined) {
+    return;
+  }
+  if (typeof pricing !== 'object' || pricing === null || Array.isArray(pricing)) {
+    throw new AiConfigurationError(`${where} pricing must contain an input price.`);
+  }
+  const value = pricing.input;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new AiConfigurationError(
+      `${where} pricing.input must be a finite nonnegative number.`,
     );
   }
 }
