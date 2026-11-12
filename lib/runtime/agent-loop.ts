@@ -5,7 +5,7 @@ import type { AiUsage, AiUsageEvent } from '../interfaces/ai-usage.interface.js'
 import { addCost, addUsage, ZERO_USAGE } from '../utils/usage.util.js';
 import { runStep, type StepAttempt } from './model-policy.js';
 import type { CallPlan } from './call-plan.js';
-import { generateStep, streamStep, wantsAnotherStep, type StepOutcome, type StepOutput } from './steps.js';
+import { answeredOutcome, generateStep, streamStep, wantsAnotherStep, type StepOutcome, type StepOutput } from './steps.js';
 
 export type LoopMode =
   | { stream: false; output?: StepOutput }
@@ -36,9 +36,19 @@ export async function runLoop(plan: CallPlan, mode: LoopMode, report: (event: Ai
     assertWithinBudget(plan, usage, cost);
     const conversation = [...messages];
     const run = async (attempt: StepAttempt) => {
-      const outcome = mode.stream
-        ? await streamStep(plan, index, conversation, attempt)
-        : await generateStep(plan, index, conversation, attempt, mode.output);
+      let outcome: StepOutcome & { finish?: UIMessageChunk };
+      try {
+        outcome = mode.stream
+          ? await streamStep(plan, index, conversation, attempt)
+          : await generateStep(plan, index, conversation, attempt, mode.output);
+      } catch (error) {
+        // An answer that is not the object still cost its tokens.
+        const answered = answeredOutcome(error);
+        if (answered) {
+          report(usageEvent(plan, attempt, answered, mode.stream));
+        }
+        throw error;
+      }
       report(usageEvent(plan, attempt, outcome, mode.stream));
       return outcome;
     };

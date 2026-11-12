@@ -66,7 +66,12 @@ export async function generateStep(
   } catch (error) {
     // The model answered, and its answer is not the object: no retry or other model is tried.
     if (output && NoObjectGeneratedError.isInstance(error)) {
-      throw toOutputError(error, error.text ?? '');
+      const text = error.text ?? '';
+      throw answeredWith(toOutputError(error, text), {
+        step: describeStep(index, attempt.model, { text, content: [], finishReason: error.finishReason ?? 'other', usage: error.usage }),
+        responseMessages: [],
+        durationMs: performance.now() - started,
+      });
     }
     throw error;
   } finally {
@@ -86,10 +91,23 @@ export async function generateStep(
     try {
       outcome.output = result.output;
     } catch (error) {
-      throw toOutputError(error, result.text);
+      throw answeredWith(toOutputError(error, result.text), outcome);
     }
   }
   return outcome;
+}
+
+/** The model calls that answered, and whose answer is not the object: their tokens were spent all the same. */
+const answered = new WeakMap<AiOutputError, StepOutcome>();
+
+function answeredWith(error: AiOutputError, outcome: StepOutcome): AiOutputError {
+  answered.set(error, outcome);
+  return error;
+}
+
+/** The outcome of the model call that answered with what `error` (an `AiOutputError`) rejects. */
+export function answeredOutcome(error: unknown): StepOutcome | undefined {
+  return error instanceof AiOutputError ? answered.get(error) : undefined;
 }
 
 /** An answer that is not JSON, or does not match the schema. */

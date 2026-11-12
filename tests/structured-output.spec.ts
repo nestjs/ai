@@ -5,7 +5,7 @@
 import { Injectable } from '@nestjs/common';
 import type { TestingModule } from '@nestjs/testing';
 import * as z from 'zod';
-import { AgentFunction, AiConfigurationError, AiOutputError } from '../lib/index.js';
+import { AgentFunction, AiConfigurationError, AiOutputError, type AiUsageEvent } from '../lib/index.js';
 import { FakeModel } from '../lib/testing/index.js';
 import { createAi } from './support/module.js';
 
@@ -74,6 +74,30 @@ describe('structured output', () => {
     expect(mismatch.message).toContain("The model's answer does not match the schema");
     expect(mismatch.message).toContain('number: Invalid input: expected string');
     expect(mismatch.text).toBe('{"number":7}');
+  });
+
+  it('reports the usage of an answer that is not the object', async () => {
+    const events: AiUsageEvent[] = [];
+    const model = new FakeModel([
+      { text: 'Sure! Here it is.', usage: { inputTokens: 5, outputTokens: 1 } },
+      { object: { number: 7 }, usage: { inputTokens: 5, outputTokens: 2 } },
+      { text: '', finishReason: 'length', usage: { inputTokens: 5, outputTokens: 3 } },
+    ]);
+    const { moduleRef: ref, ai } = await createAi({
+      models: { default: { model, pricing: { input: 1_000_000, output: 1_000_000 } } },
+      onUsage: (event) => void events.push(event),
+    });
+    moduleRef = ref;
+
+    for (let i = 0; i < 3; i++) {
+      await expect(ai.generateObject({ schema: Invoice, prompt: 'Extract' })).rejects.toBeInstanceOf(AiOutputError);
+    }
+    expect(model.calls).toHaveLength(3);
+    expect(events.map(({ usage, cost, finishReason }) => ({ tokens: usage.totalTokens, cost, finishReason }))).toEqual([
+      { tokens: 6, cost: 6, finishReason: 'stop' },
+      { tokens: 7, cost: 7, finishReason: 'stop' },
+      { tokens: 8, cost: 8, finishReason: 'length' },
+    ]);
   });
 
   it('answers the object after the tool calls it needed', async () => {
