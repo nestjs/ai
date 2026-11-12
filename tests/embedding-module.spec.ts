@@ -265,16 +265,34 @@ describe('embedding model registration', () => {
         }).compile(),
       ).rejects.toThrow(AiConfigurationError);
     }
-    for (const input of [-1, Infinity, NaN]) {
+    for (const input of [-1, Infinity, -Infinity, NaN, '1', null, undefined]) {
       await expect(
         Test.createTestingModule({
           imports: [
             AiModule.forRoot({
-              embeddingModels: { default: { model, pricing: { input } } },
+              embeddingModels: { default: { model, pricing: { input } as any } },
             }),
           ],
         }).compile(),
-      ).rejects.toThrow(AiConfigurationError);
+      ).rejects.toMatchObject({
+        name: 'AiConfigurationError',
+        message:
+          'AiModule: the embedding model "default" pricing.input must be a finite nonnegative number.',
+      });
+    }
+    for (const pricing of [null, [], Object.assign([], { input: 1 }), '1', 1]) {
+      await expect(
+        Test.createTestingModule({
+          imports: [
+            AiModule.forRoot({
+              embeddingModels: { default: { model, pricing: pricing as any } },
+            }),
+          ],
+        }).compile(),
+      ).rejects.toMatchObject({
+        name: 'AiConfigurationError',
+        message: 'AiModule: the embedding model "default" pricing must contain an input price.',
+      });
     }
     expect(model.calls).toEqual([]);
   });

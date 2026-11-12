@@ -12,7 +12,10 @@ export interface AiEmbeddingSettings extends AiResilienceSettings {
   maxParallelCalls?: number;
 }
 
-/** Price per million input tokens, in the unit used for reported `cost`. */
+/**
+ * Price per million input tokens, in the unit used for reported `cost`.
+ * The price must be finite and nonnegative; invalid pricing fails at startup.
+ */
 export interface AiEmbeddingModelPricing {
   input: number;
 }
