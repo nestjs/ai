@@ -280,7 +280,7 @@ describe('embedding model registration', () => {
           'AiModule: the embedding model "default" pricing.input must be a finite nonnegative number.',
       });
     }
-    for (const pricing of [null, [], '1', 1]) {
+    for (const pricing of [null, [], Object.assign([], { input: 1 }), '1', 1]) {
       await expect(
         Test.createTestingModule({
           imports: [
