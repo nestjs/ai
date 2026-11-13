@@ -36,8 +36,9 @@ export interface AiResilienceSettings {
   timeout?: Duration | false;
   /**
    * Retries of a failed model call, as `@nestjs/resilience`'s `RetryPolicy` takes them: `attempts` (default 3, the
-   * first included), `backoff` (default from `'1s'`, doubling, up to `'30s'`, full jitter), `retryIf`. Retried by
-   * default: what the provider marks retryable (408, 409, 429, 5xx and network failures) and timeouts; a
+   * first included), `backoff` (default from `'1s'`, doubling, up to `'30s'`; jitter defaults to full, or none
+   * when `factor` is 1, unless explicitly configured), `retryIf`. Retried by default: what the provider marks
+   * retryable (408, 409, 429, 5xx and network failures) and timeouts; a
    * `retry-after` the provider sends is honored, and one longer than `backoff.maxDelay` moves on to the fallback.
    * An embedding call has no fallback, and retries only the provider request that failed. `false` for none.
    */

@@ -101,6 +101,39 @@ describe('model calls', () => {
   });
 
   describe('retries', () => {
+    it.each([
+      { name: 'factor 1 defaults to no jitter', backoff: { delay: 100, factor: 1 }, waits: [100, 100] },
+      { name: 'the default factor uses full jitter', backoff: { delay: 100 }, waits: [50, 100] },
+      { name: 'another factor defaults to full jitter', backoff: { delay: 100, factor: 3 }, waits: [50, 150] },
+      { name: 'explicit full jitter overrides factor 1', backoff: { delay: 100, factor: 1, jitter: 'full' as const }, waits: [50, 50] },
+      { name: 'explicit equal jitter overrides factor 1', backoff: { delay: 100, factor: 1, jitter: 'equal' as const }, waits: [75, 75] },
+      { name: 'explicit no jitter overrides factor 2', backoff: { delay: 100, factor: 2, jitter: 'none' as const }, waits: [100, 200] },
+    ])('$name', async ({ backoff, waits }) => {
+      const model = new FakeModel([providerError(503), providerError(503), 'after retries']);
+      const { moduleRef: ref, ai } = await createAi({ models: { default: model }, defaults: { retry: { attempts: 3, backoff }, timeout: false } });
+      moduleRef = ref;
+
+      vi.useFakeTimers();
+      const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
+      try {
+        const result = ai.generateText({ prompt: 'Hi' });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(model.calls).toHaveLength(1);
+
+        for (const [index, wait] of waits.entries()) {
+          await vi.advanceTimersByTimeAsync(wait - 1);
+          expect(model.calls).toHaveLength(index + 1);
+          await vi.advanceTimersByTimeAsync(1);
+          expect(model.calls).toHaveLength(index + 2);
+        }
+
+        expect((await result).text).toBe('after retries');
+      } finally {
+        random.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
     it('retries what the provider marks retryable, then answers', async () => {
       const model = new FakeModel([providerError(429), providerError(503), 'third time']);
       const { moduleRef: ref, ai } = await createAi({ models: { default: model }, defaults: { retry: noWait } });
