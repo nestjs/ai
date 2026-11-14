@@ -70,7 +70,7 @@ describe('@nestjs/ai/testing', () => {
     it('fails as a provider does, and waits as long as it is told unless the call is aborted', async () => {
       const error = providerError(429, { retryAfter: 2 });
       expect(error).toBeInstanceOf(APICallError);
-      expect(error).toMatchObject({ statusCode: 429, isRetryable: true, responseHeaders: { 'retry-after': '2' } });
+      expect(error).toMatchObject({ statusCode: 429, isRetryable: true });
       expect(providerError(400).isRetryable).toBe(false);
 
       const model = fakeModel(error, { text: 'slow', delay: 5_000 });
@@ -79,6 +79,24 @@ describe('@nestjs/ai/testing', () => {
       const slow = generateText({ model, prompt: 'b', maxRetries: 0, abortSignal: controller.signal });
       controller.abort(new Error('stop'));
       await expect(slow).rejects.toThrow('stop');
+    });
+  });
+
+  describe('providerError()', () => {
+    it('uses retryAfter for the retry-after header', () => {
+      expect(providerError(429, { retryAfter: 2 }).responseHeaders).toEqual({ 'retry-after': '2' });
+    });
+
+    it('uses custom response headers as provided', () => {
+      const responseHeaders = { 'retry-after-ms': '2000', 'x-provider': 'fake' };
+      expect(providerError(429, { responseHeaders }).responseHeaders).toEqual(responseHeaders);
+    });
+
+    it('uses explicit response headers instead of merging retryAfter', () => {
+      const responseHeaders = { 'retry-after-ms': '2000' };
+      expect(
+        providerError(429, { retryAfter: 2, responseHeaders }).responseHeaders,
+      ).toEqual(responseHeaders);
     });
   });
 
