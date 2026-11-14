@@ -59,7 +59,7 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@ai-sdk/anthropic": "4.0.104",
+    "@ai-sdk/anthropic": "4.0.105",
     "@commitlint/cli": "21.2.4",
     "@commitlint/config-angular": "21.2.4",
     "@modelcontextprotocol/client": "2.4.0",
