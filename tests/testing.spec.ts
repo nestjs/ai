@@ -92,11 +92,22 @@ describe('@nestjs/ai/testing', () => {
       expect(providerError(429, { responseHeaders }).responseHeaders).toEqual(responseHeaders);
     });
 
-    it('uses explicit response headers instead of merging retryAfter', () => {
+    it('merges custom response headers with retryAfter', () => {
       const responseHeaders = { 'retry-after-ms': '2000' };
       expect(
         providerError(429, { retryAfter: 2, responseHeaders }).responseHeaders,
+      ).toEqual({ 'retry-after': '2', 'retry-after-ms': '2000' });
+    });
+
+    it('lets an explicit retry-after header override retryAfter', () => {
+      const responseHeaders = { 'retry-after': '5' };
+      expect(
+        providerError(429, { retryAfter: 2, responseHeaders }).responseHeaders,
       ).toEqual(responseHeaders);
+    });
+
+    it('leaves responseHeaders undefined when neither header option is given', () => {
+      expect(providerError(429).responseHeaders).toBeUndefined();
     });
   });
 
