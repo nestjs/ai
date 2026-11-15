@@ -103,6 +103,7 @@ describe('model calls', () => {
   describe('retries', () => {
     it.each([
       { name: 'factor 1 defaults to no jitter', backoff: { delay: 100, factor: 1 }, waits: [100, 100] },
+      { name: 'a factor below 1 defaults to no jitter', backoff: { delay: 100, factor: 0.5 }, waits: [100, 100] },
       { name: 'the default factor uses full jitter', backoff: { delay: 100 }, waits: [50, 100] },
       { name: 'another factor defaults to full jitter', backoff: { delay: 100, factor: 3 }, waits: [50, 150] },
       { name: 'explicit full jitter overrides factor 1', backoff: { delay: 100, factor: 1, jitter: 'full' as const }, waits: [50, 50] },

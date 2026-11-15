@@ -283,11 +283,12 @@ function unwrap(error: unknown): unknown {
 
 function exponential(
   attempt: number,
-  { delay, factor = 2, maxDelay, jitter = factor === 1 ? 'none' : 'full' }: { delay?: number | string; factor?: number; maxDelay?: number | string; jitter?: 'full' | 'equal' | 'none' },
+  { delay, factor = 2, maxDelay, jitter }: { delay?: number | string; factor?: number; maxDelay?: number | string; jitter?: 'full' | 'equal' | 'none' },
 ): number {
+  const growth = Math.max(1, factor);
   const max = toMilliseconds(maxDelay ?? DEFAULT_BACKOFF.maxDelay, 'retry.backoff.maxDelay');
-  const computed = Math.min(max, toMilliseconds(delay ?? DEFAULT_BACKOFF.delay, 'retry.backoff.delay') * Math.max(1, factor) ** (attempt - 1));
-  switch (jitter) {
+  const computed = Math.min(max, toMilliseconds(delay ?? DEFAULT_BACKOFF.delay, 'retry.backoff.delay') * growth ** (attempt - 1));
+  switch (jitter ?? (growth === 1 ? 'none' : 'full')) {
     case 'none':
       return computed;
     case 'equal':
