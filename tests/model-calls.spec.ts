@@ -194,6 +194,68 @@ describe('model calls', () => {
       expect(limited.calls).toHaveLength(1);
     });
 
+    describe.each(['America/Sao_Paulo', 'Asia/Tokyo'])('in the %s time zone', (zone) => {
+      const tz = process.env.TZ;
+
+      beforeEach(() => {
+        process.env.TZ = zone;
+      });
+
+      afterEach(() => {
+        if (tz === undefined) {
+          delete process.env.TZ;
+        } else {
+          process.env.TZ = tz;
+        }
+      });
+
+      it.each([
+        { format: 'IMF-fixdate', value: 'Fri, 13 Nov 2026 12:00:02 GMT' },
+        { format: 'RFC 850', value: 'Friday, 13-Nov-26 12:00:02 GMT' },
+        { format: 'asctime', value: 'Fri Nov 13 12:00:02 2026' },
+      ])('honors a retry-after $format date as GMT', async ({ value }) => {
+        vi.useFakeTimers({ now: new Date('2026-11-13T12:00:00Z') });
+        const model = new FakeModel([
+          providerError(429, { responseHeaders: { 'retry-after': value } }),
+          'after the wait',
+        ]);
+        const { moduleRef: ref, ai } = await createAi({ models: { default: model }, defaults: { retry: noWait } });
+        moduleRef = ref;
+
+        const generation = ai.generateText({ prompt: 'Hi' });
+        await vi.advanceTimersByTimeAsync(1_999);
+        expect(model.calls).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect((await generation).text).toBe('after the wait');
+        expect(model.calls).toHaveLength(2);
+      });
+    });
+
+    it('reads a two-digit RFC 850 year as at most 50 years ahead', async () => {
+      vi.useFakeTimers({ now: new Date('2026-11-13T12:00:00Z') });
+      const ahead = new FakeModel([
+        providerError(429, { responseHeaders: { 'retry-after': 'Friday, 13-Nov-76 12:00:02 GMT' } }),
+        'never',
+      ]);
+      const { moduleRef: ref, ai } = await createAi({ models: { default: ahead }, defaults: { retry: noWait } });
+      moduleRef = ref;
+
+      const generation = ai.generateText({ prompt: 'Hi' }).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(0);
+      const error = (await generation) as AiModelError;
+      expect(error).toBeInstanceOf(AiModelError);
+      expect(ahead.calls).toHaveLength(1);
+
+      const past = new FakeModel([
+        providerError(429, { responseHeaders: { 'retry-after': 'Saturday, 13-Nov-77 12:00:02 GMT' } }),
+        'right away',
+      ]);
+      const retried = ai.generateText({ model: past, prompt: 'Hi' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect((await retried).text).toBe('right away');
+      expect(past.calls).toHaveLength(2);
+    });
+
     it.each([
       { header: 'retry-after', error: providerError(429, { retryAfter: 0.05 }) },
       {

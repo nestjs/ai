@@ -317,8 +317,32 @@ function retryAfter(error: unknown): number | undefined {
   if (Number.isFinite(seconds) && seconds >= 0) {
     return seconds * 1_000;
   }
-  const date = Date.parse(value);
+  const date = httpDate(value);
   return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
+const ASCTIME = /^[a-z]{3} [a-z]{3} [ \d]\d \d{2}:\d{2}:\d{2} \d{4}$/i;
+const RFC850 = /^[a-z]+, (\d{2})-([a-z]{3})-(\d{2}) (\d{2}:\d{2}:\d{2}) GMT$/i;
+
+/**
+ * An HTTP-date in any of its three forms, which are all GMT (RFC 9110, section 5.6.7): `Date.parse()` reads an asctime
+ * date in the local time zone, and a two-digit RFC 850 year as 1950-2049 rather than at most 50 years ahead.
+ */
+function httpDate(value: string): number {
+  if (ASCTIME.test(value)) {
+    return Date.parse(`${value} GMT`);
+  }
+  const rfc850 = RFC850.exec(value);
+  if (!rfc850) {
+    return Date.parse(value);
+  }
+  const [, day, month, shortYear, time] = rfc850;
+  const thisYear = new Date().getUTCFullYear();
+  let year = thisYear - (thisYear % 100) + Number(shortYear);
+  if (year > thisYear + 50) {
+    year -= 100;
+  }
+  return Date.parse(`${day} ${month} ${year} ${time} GMT`);
 }
 
 function nameOf(model: PolicyModel, namespace = 'ai'): string {
