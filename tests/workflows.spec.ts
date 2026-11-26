@@ -192,6 +192,7 @@ describe('durable agent runs', () => {
     expect(await agents.pendingApprovals('run-cancelled')).toHaveLength(1);
 
     await client.cancel('run-cancelled');
+    expect(await agents.pendingApprovals('run-cancelled')).toEqual([]);
     await worker.drain();
 
     expect(await client.getStatus('run-cancelled')).toMatchObject({ status: 'cancelled' });

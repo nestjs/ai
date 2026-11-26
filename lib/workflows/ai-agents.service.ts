@@ -28,7 +28,7 @@ const DEFAULT_MAX_STEPS = 25;
 const DEFAULT_STEPS_PER_INSTANCE = 10;
 
 /** The statuses of an instance that waits for nothing any more: its custom status is what it last set. */
-const FINISHED: readonly WorkflowStatus[] = ['completed', 'failed', 'cancelled', 'compensation_failed'];
+const FINISHED: readonly WorkflowStatus[] = ['compensating', 'completed', 'failed', 'cancelled', 'compensation_failed'];
 
 /** A run's options, resolved once and stored with it: tools as names. Internal. */
 export interface AgentSettings extends Omit<AiAgentRunOptions, 'tools' | 'prompt' | 'messages'> {
@@ -113,8 +113,9 @@ export class AiAgents {
     const pending: AiPendingApproval[] = [];
     const visit = async (id: string) => {
       const details = await this.client.getStatus(id, { children: true });
-      // A run that ended (cancelled or terminated while it waited, say) keeps the approvals it last listed.
-      if (!details || FINISHED.includes(details.status)) {
+      // A run that ended (cancelled or terminated while it waited, say) keeps the approvals it last listed. So does one
+      // whose cancel is accepted but not yet processed: no answer can resume it.
+      if (!details || details.cancelRequested || FINISHED.includes(details.status)) {
         return;
       }
       pending.push(...((details.customStatus as AgentStatus | null)?.pendingApprovals ?? []));
