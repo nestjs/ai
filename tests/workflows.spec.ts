@@ -184,6 +184,20 @@ describe('durable agent runs', () => {
     expect(output.toolResults).toContainEqual(expect.objectContaining({ toolName: 'refund', error: 'The call was rejected: The order is past the refund window' }));
   });
 
+  it('lists no approvals for a run that was cancelled while it waited for one', async () => {
+    const model = new FakeModel(refundAnswers());
+    const { client, worker, agents } = await boot(model);
+    await client.start(RefundRequest, { email: 'Please refund ord_1', customer: 'bob' }, { id: 'run-cancelled' });
+    await worker.drain();
+    expect(await agents.pendingApprovals('run-cancelled')).toHaveLength(1);
+
+    await client.cancel('run-cancelled');
+    await worker.drain();
+
+    expect(await client.getStatus('run-cancelled')).toMatchObject({ status: 'cancelled' });
+    expect(await agents.pendingApprovals('run-cancelled')).toEqual([]);
+  });
+
   it.each([
     { where: 'in one workflow', runId: 'run-4', stepsPerInstance: undefined },
     { where: 'across child workflows', runId: 'run-4-child', stepsPerInstance: 1 },
