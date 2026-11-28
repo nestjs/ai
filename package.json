@@ -76,7 +76,7 @@
     "@nestjs/testing": "12.6.0",
     "@nestjs/workflows": "0.0.5",
     "@types/node": "26.6.11",
-    "ai": "7.0.181",
+    "ai": "7.0.184",
     "husky": "9.1.7",
     "lint-staged": "17.6.2",
     "oxlint": "1.95.0",
